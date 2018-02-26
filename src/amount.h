@@ -20,7 +20,8 @@ private:
 public:
     constexpr Amount() : amount(0) {}
 
-    template <typename T> constexpr Amount(T _camount) : amount(_camount) {
+    template <typename T>
+    explicit constexpr Amount(T _camount) : amount(_camount) {
         static_assert(std::is_integral<T>(),
                       "Only integer types can be used as amounts");
     }
@@ -30,7 +31,7 @@ public:
     // Allow access to underlying value for non-monetary operations
     int64_t GetSatoshis() const { return amount; }
 
-    /*
+    /**
      * Implement standard operators
      */
     Amount &operator+=(const Amount a) {
@@ -41,39 +42,61 @@ public:
         amount -= a.amount;
         return *this;
     }
-    friend constexpr bool operator<(const Amount a, const Amount b) {
-        return a.amount < b.amount;
-    }
+
+    /**
+     * Equality
+     */
     friend constexpr bool operator==(const Amount a, const Amount b) {
         return a.amount == b.amount;
     }
-    friend constexpr bool operator>(const Amount a, const Amount b) {
-        return b.amount < a.amount;
-    }
     friend constexpr bool operator!=(const Amount a, const Amount b) {
-        return !(a.amount == b.amount);
+        return !(a == b);
+    }
+
+    /**
+     * Comparison
+     */
+    friend constexpr bool operator<(const Amount a, const Amount b) {
+        return a.amount < b.amount;
+    }
+    friend constexpr bool operator>(const Amount a, const Amount b) {
+        return b < a;
     }
     friend constexpr bool operator<=(const Amount a, const Amount b) {
-        return !(a.amount > b.amount);
+        return !(a > b);
     }
     friend constexpr bool operator>=(const Amount a, const Amount b) {
-        return !(a.amount < b.amount);
+        return !(a < b);
     }
+
+    /**
+     * Unary minus
+     */
+    constexpr Amount operator-() const { return Amount(-amount); }
+
+    /**
+     * Addition and subtraction.
+     */
     friend constexpr Amount operator+(const Amount a, const Amount b) {
         return Amount(a.amount + b.amount);
     }
     friend constexpr Amount operator-(const Amount a, const Amount b) {
-        return Amount(a.amount - b.amount);
+        return a + -b;
     }
-    // Implemented for allowing COIN as a base unit.
+
+    /**
+     * Multiplication
+     */
     friend constexpr Amount operator*(const int64_t a, const Amount b) {
         return Amount(a * b.amount);
     }
     friend constexpr Amount operator*(const int a, const Amount b) {
         return Amount(a * b.amount);
     }
-    // DO NOT IMPLEMENT
-    friend constexpr Amount operator*(const double a, const Amount b) = delete;
+
+    /**
+     * Division
+     */
     constexpr int64_t operator/(const Amount b) const {
         return amount / b.amount;
     }
@@ -81,13 +104,31 @@ public:
         return Amount(amount / b);
     }
     constexpr Amount operator/(const int b) const { return Amount(amount / b); }
-    // DO NOT IMPLEMENT
+
+    /**
+     * Modulus
+     */
+    constexpr int64_t operator%(const Amount b) const {
+        return amount % b.amount;
+    }
+    constexpr Amount operator%(const int64_t b) const {
+        return Amount(amount % b);
+    }
+    constexpr Amount operator%(const int b) const { return Amount(amount % b); }
+
+    /**
+     * Do not implement double ops to get an error with double and ensure
+     * casting to integer is explicit.
+     */
+    friend constexpr Amount operator*(const double a, const Amount b) = delete;
     constexpr Amount operator/(const double b) const = delete;
+    constexpr Amount operator%(const double b) const = delete;
 
     // ostream support
     friend std::ostream &operator<<(std::ostream &stream, const Amount &ca) {
         return stream << ca.amount;
     }
+
     std::string ToString() const;
 
     // serialization support
@@ -99,11 +140,8 @@ public:
     }
 };
 
-/** Amount in satoshis (Can be negative) */
-typedef int64_t CAmount;
-
-static const Amount COIN = 100000000;
-static const Amount CENT = 1000000;
+static const Amount COIN(100000000);
+static const Amount CENT(1000000);
 
 extern const std::string CURRENCY_UNIT;
 
@@ -111,7 +149,7 @@ extern const std::string CURRENCY_UNIT;
  * No amount larger than this (in satoshi) is valid.
  *
  * Note that this constant is *not* the total money supply, which in Bitcoin
- * currently happens to be less than 21,000,000 BCC for various reasons, but
+ * currently happens to be less than 21,000,000 BCH for various reasons, but
  * rather a sanity check. As this sanity check is used by consensus-critical
  * validation code, the exact value of the MAX_MONEY constant is consensus
  * critical; in unusual circumstances like a(nother) overflow bug that allowed
@@ -119,7 +157,7 @@ extern const std::string CURRENCY_UNIT;
  */
 static const Amount MAX_MONEY = 21000000 * COIN;
 inline bool MoneyRange(const Amount nValue) {
-    return (nValue >= 0 && nValue <= MAX_MONEY);
+    return (nValue >= Amount(0) && nValue <= MAX_MONEY);
 }
 
 /**

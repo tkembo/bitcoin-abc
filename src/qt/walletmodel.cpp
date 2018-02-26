@@ -12,7 +12,7 @@
 #include "recentrequeststablemodel.h"
 #include "transactiontablemodel.h"
 
-#include "base58.h"
+#include "dstencode.h"
 #include "keystore.h"
 #include "net.h" // for g_connman
 #include "sync.h"
@@ -55,43 +55,43 @@ WalletModel::~WalletModel() {
     unsubscribeFromCoreSignals();
 }
 
-CAmount WalletModel::getBalance(const CCoinControl *coinControl) const {
+Amount WalletModel::getBalance(const CCoinControl *coinControl) const {
     if (coinControl) {
-        Amount nBalance = 0;
+        Amount nBalance(0);
         std::vector<COutput> vCoins;
         wallet->AvailableCoins(vCoins, true, coinControl);
         for (const COutput &out : vCoins) {
             if (out.fSpendable) nBalance += out.tx->tx->vout[out.i].nValue;
         }
 
-        return nBalance.GetSatoshis();
+        return nBalance;
     }
 
-    return wallet->GetBalance().GetSatoshis();
+    return wallet->GetBalance();
 }
 
-CAmount WalletModel::getUnconfirmedBalance() const {
-    return wallet->GetUnconfirmedBalance().GetSatoshis();
+Amount WalletModel::getUnconfirmedBalance() const {
+    return wallet->GetUnconfirmedBalance();
 }
 
-CAmount WalletModel::getImmatureBalance() const {
-    return wallet->GetImmatureBalance().GetSatoshis();
+Amount WalletModel::getImmatureBalance() const {
+    return wallet->GetImmatureBalance();
 }
 
 bool WalletModel::haveWatchOnly() const {
     return fHaveWatchOnly;
 }
 
-CAmount WalletModel::getWatchBalance() const {
-    return wallet->GetWatchOnlyBalance().GetSatoshis();
+Amount WalletModel::getWatchBalance() const {
+    return wallet->GetWatchOnlyBalance();
 }
 
-CAmount WalletModel::getWatchUnconfirmedBalance() const {
-    return wallet->GetUnconfirmedWatchOnlyBalance().GetSatoshis();
+Amount WalletModel::getWatchUnconfirmedBalance() const {
+    return wallet->GetUnconfirmedWatchOnlyBalance();
 }
 
-CAmount WalletModel::getWatchImmatureBalance() const {
-    return wallet->GetImmatureWatchOnlyBalance().GetSatoshis();
+Amount WalletModel::getWatchImmatureBalance() const {
+    return wallet->GetImmatureWatchOnlyBalance();
 }
 
 void WalletModel::updateStatus() {
@@ -122,12 +122,12 @@ void WalletModel::pollBalanceChanged() {
 }
 
 void WalletModel::checkBalanceChanged() {
-    CAmount newBalance = getBalance();
-    CAmount newUnconfirmedBalance = getUnconfirmedBalance();
-    CAmount newImmatureBalance = getImmatureBalance();
-    CAmount newWatchOnlyBalance = 0;
-    CAmount newWatchUnconfBalance = 0;
-    CAmount newWatchImmatureBalance = 0;
+    Amount newBalance(getBalance());
+    Amount newUnconfirmedBalance(getUnconfirmedBalance());
+    Amount newImmatureBalance(getImmatureBalance());
+    Amount newWatchOnlyBalance(0);
+    Amount newWatchUnconfBalance(0);
+    Amount newWatchImmatureBalance(0);
     if (haveWatchOnly()) {
         newWatchOnlyBalance = getWatchBalance();
         newWatchUnconfBalance = getWatchUnconfirmedBalance();
@@ -176,7 +176,7 @@ bool WalletModel::validateAddress(const QString &address) {
 WalletModel::SendCoinsReturn
 WalletModel::prepareTransaction(WalletModelTransaction &transaction,
                                 const CCoinControl *coinControl) {
-    CAmount total = 0;
+    Amount total(0);
     bool fSubtractFeeFromAmount = false;
     QList<SendCoinsRecipient> recipients = transaction.getRecipients();
     std::vector<CRecipient> vecSend;
@@ -195,22 +195,22 @@ WalletModel::prepareTransaction(WalletModelTransaction &transaction,
 
         // PaymentRequest...
         if (rcp.paymentRequest.IsInitialized()) {
-            CAmount subtotal = 0;
+            Amount subtotal(0);
             const payments::PaymentDetails &details =
                 rcp.paymentRequest.getDetails();
             for (int i = 0; i < details.outputs_size(); i++) {
                 const payments::Output &out = details.outputs(i);
                 if (out.amount() <= 0) continue;
-                subtotal += out.amount();
+                subtotal += Amount(out.amount());
                 const uint8_t *scriptStr = (const uint8_t *)out.script().data();
                 CScript scriptPubKey(scriptStr,
                                      scriptStr + out.script().size());
-                CAmount nAmount = out.amount();
-                CRecipient recipient = {scriptPubKey, nAmount,
+                Amount nAmount = Amount(out.amount());
+                CRecipient recipient = {scriptPubKey, Amount(nAmount),
                                         rcp.fSubtractFeeFromAmount};
                 vecSend.push_back(recipient);
             }
-            if (subtotal <= 0) {
+            if (subtotal <= Amount(0)) {
                 return InvalidAmount;
             }
             total += subtotal;
@@ -218,15 +218,15 @@ WalletModel::prepareTransaction(WalletModelTransaction &transaction,
             if (!validateAddress(rcp.address)) {
                 return InvalidAddress;
             }
-            if (rcp.amount <= 0) {
+            if (rcp.amount <= Amount(0)) {
                 return InvalidAmount;
             }
             setAddress.insert(rcp.address);
             ++nAddresses;
 
-            CScript scriptPubKey = GetScriptForDestination(
-                DecodeDestination(rcp.address.toStdString()));
-            CRecipient recipient = {scriptPubKey, rcp.amount,
+            CScript scriptPubKey = GetScriptForDestination(DecodeDestination(
+                rcp.address.toStdString(), wallet->chainParams));
+            CRecipient recipient = {scriptPubKey, Amount(rcp.amount),
                                     rcp.fSubtractFeeFromAmount};
             vecSend.push_back(recipient);
 
@@ -237,7 +237,7 @@ WalletModel::prepareTransaction(WalletModelTransaction &transaction,
         return DuplicateAddress;
     }
 
-    CAmount nBalance = getBalance(coinControl);
+    Amount nBalance = getBalance(coinControl);
 
     if (total > nBalance) {
         return AmountExceedsBalance;
@@ -248,7 +248,7 @@ WalletModel::prepareTransaction(WalletModelTransaction &transaction,
 
         transaction.newPossibleKeyChange(wallet);
 
-        Amount nFeeRequired = 0;
+        Amount nFeeRequired(0);
         int nChangePosRet = -1;
         std::string strFailReason;
 
@@ -257,13 +257,12 @@ WalletModel::prepareTransaction(WalletModelTransaction &transaction,
         bool fCreated = wallet->CreateTransaction(vecSend, *newTx, *keyChange,
                                                   nFeeRequired, nChangePosRet,
                                                   strFailReason, coinControl);
-        transaction.setTransactionFee(nFeeRequired.GetSatoshis());
+        transaction.setTransactionFee(nFeeRequired);
         if (fSubtractFeeFromAmount && fCreated)
             transaction.reassignAmounts(nChangePosRet);
 
         if (!fCreated) {
-            if (!fSubtractFeeFromAmount &&
-                (total + nFeeRequired.GetSatoshis()) > nBalance) {
+            if (!fSubtractFeeFromAmount && (total + nFeeRequired) > nBalance) {
                 return SendCoinsReturn(AmountWithFeeExceedsBalance);
             }
             Q_EMIT message(tr("Send Coins"),
@@ -330,7 +329,8 @@ WalletModel::sendCoins(WalletModelTransaction &transaction) {
         // Don't touch the address book when we have a payment request
         if (!rcp.paymentRequest.IsInitialized()) {
             std::string strAddress = rcp.address.toStdString();
-            CTxDestination dest = DecodeDestination(strAddress);
+            CTxDestination dest =
+                DecodeDestination(strAddress, wallet->chainParams);
             std::string strLabel = rcp.label.toStdString();
             {
                 LOCK(wallet->cs_wallet);
@@ -438,8 +438,9 @@ static void NotifyAddressBookChanged(WalletModel *walletmodel, CWallet *wallet,
     QString strPurpose = QString::fromStdString(purpose);
 
     qDebug() << "NotifyAddressBookChanged: " + strAddress + " " + strLabel +
-                    " isMine=" + QString::number(isMine) + " purpose=" +
-                    strPurpose + " status=" + QString::number(status);
+                    " isMine=" + QString::number(isMine) +
+                    " purpose=" + strPurpose +
+                    " status=" + QString::number(status);
     QMetaObject::invokeMethod(walletmodel, "updateAddressBook",
                               Qt::QueuedConnection, Q_ARG(QString, strAddress),
                               Q_ARG(QString, strLabel), Q_ARG(bool, isMine),
@@ -547,8 +548,8 @@ void WalletModel::getOutputs(const std::vector<COutPoint> &vOutpoints,
         if (!wallet->mapWallet.count(outpoint.hash)) continue;
         int nDepth = wallet->mapWallet[outpoint.hash].GetDepthInMainChain();
         if (nDepth < 0) continue;
-        COutput out(&wallet->mapWallet[outpoint.hash], outpoint.n, nDepth, true,
-                    true);
+        COutput out(&wallet->mapWallet[outpoint.hash], outpoint.n, nDepth,
+                    true /* spendable */, true /* solvable */, true /* safe */);
         vOutputs.push_back(out);
     }
 }
@@ -575,11 +576,12 @@ void WalletModel::listCoins(
         if (!wallet->mapWallet.count(outpoint.hash)) continue;
         int nDepth = wallet->mapWallet[outpoint.hash].GetDepthInMainChain();
         if (nDepth < 0) continue;
-        COutput out(&wallet->mapWallet[outpoint.hash], outpoint.n, nDepth, true,
-                    true);
+        COutput out(&wallet->mapWallet[outpoint.hash], outpoint.n, nDepth,
+                    true /* spendable */, true /* solvable */, true /* safe */);
         if (outpoint.n < out.tx->tx->vout.size() &&
-            wallet->IsMine(out.tx->tx->vout[outpoint.n]) == ISMINE_SPENDABLE)
+            wallet->IsMine(out.tx->tx->vout[outpoint.n]) == ISMINE_SPENDABLE) {
             vCoins.push_back(out);
+        }
     }
 
     for (const COutput &out : vCoins) {
@@ -591,7 +593,9 @@ void WalletModel::listCoins(
             if (!wallet->mapWallet.count(cout.tx->tx->vin[0].prevout.hash))
                 break;
             cout = COutput(&wallet->mapWallet[cout.tx->tx->vin[0].prevout.hash],
-                           cout.tx->tx->vin[0].prevout.n, 0, true, true);
+                           cout.tx->tx->vin[0].prevout.n, 0 /* depth */,
+                           true /* spendable */, true /* solvable */,
+                           true /* safe */);
         }
 
         CTxDestination address;
@@ -640,7 +644,7 @@ void WalletModel::loadReceiveRequests(
 bool WalletModel::saveReceiveRequest(const std::string &sAddress,
                                      const int64_t nId,
                                      const std::string &sRequest) {
-    CTxDestination dest = DecodeDestination(sAddress);
+    CTxDestination dest = DecodeDestination(sAddress, wallet->chainParams);
 
     std::stringstream ss;
     ss << nId;
@@ -669,7 +673,7 @@ bool WalletModel::abandonTransaction(uint256 hash) const {
 }
 
 bool WalletModel::isWalletEnabled() {
-    return !GetBoolArg("-disablewallet", DEFAULT_DISABLE_WALLET);
+    return !gArgs.GetBoolArg("-disablewallet", DEFAULT_DISABLE_WALLET);
 }
 
 bool WalletModel::hdEnabled() const {
@@ -678,4 +682,8 @@ bool WalletModel::hdEnabled() const {
 
 int WalletModel::getDefaultConfirmTarget() const {
     return nTxConfirmTarget;
+}
+
+const CChainParams &WalletModel::getChainParams() const {
+    return wallet->chainParams;
 }

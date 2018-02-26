@@ -253,9 +253,9 @@ const char *GetOpName(opcodetype opcode) {
 
         // Note:
         //  The template matching params OP_SMALLINTEGER/etc are defined in
-        //  opcodetype enum as kind of implementation hack, they are *NOT* real
-        //  opcodes. If found in real Script, just let the default: case deal
-        //  with them.
+        //  opcodetype enum as kind of implementation hack, they are *NOT*
+        //  real opcodes. If found in real Script, just let the default:
+        //  case deal with them.
 
         default:
             return "OP_UNKNOWN";
@@ -306,11 +306,6 @@ bool CScript::IsPayToScriptHash() const {
     // Extra-fast test for pay-to-script-hash CScripts:
     return (this->size() == 23 && (*this)[0] == OP_HASH160 &&
             (*this)[1] == 0x14 && (*this)[22] == OP_EQUAL);
-}
-
-bool CScript::IsPayToWitnessScriptHash() const {
-    // Extra-fast test for pay-to-witness-script-hash CScripts:
-    return (this->size() == 34 && (*this)[0] == OP_0 && (*this)[1] == 0x20);
 }
 
 bool CScript::IsCommitment(const std::vector<uint8_t> &data) const {

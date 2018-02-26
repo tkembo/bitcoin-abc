@@ -16,15 +16,15 @@ if len(sys.argv) < 2:
 
 username = sys.argv[1]
 
-#This uses os.urandom() underneath
+# This uses os.urandom() underneath
 cryptogen = SystemRandom()
 
-#Create 16 byte hex salt
+# Create 16 byte hex salt
 salt_sequence = [cryptogen.randrange(256) for i in range(16)]
 hexseq = list(map(hex, salt_sequence))
 salt = "".join([x[2:] for x in hexseq])
 
-#Create 32 byte b64 password
+# Create 32 byte b64 password
 password = base64.urlsafe_b64encode(os.urandom(32))
 
 digestmod = hashlib.sha256

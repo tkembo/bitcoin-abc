@@ -166,8 +166,8 @@ public:
                 const_rpcfn_type _actor, bool _okSafeMode,
                 std::vector<std::string> _argNames)
         : category{std::move(_category)}, name{std::move(_name)},
-          actor{reinterpret_cast<rpcfn_type>(_actor)}, okSafeMode{_okSafeMode},
-          argNames{std::move(_argNames)} {}
+          actor{reinterpret_cast<rpcfn_type>(_actor)},
+          okSafeMode{_okSafeMode}, argNames{std::move(_argNames)} {}
 };
 
 /**
@@ -180,7 +180,8 @@ private:
 public:
     CRPCTable();
     const CRPCCommand *operator[](const std::string &name) const;
-    std::string help(Config &config, const std::string &name) const;
+    std::string help(Config &config, const std::string &name,
+                     const JSONRPCRequest &helpreq) const;
 
     /**
      * Execute a method.
@@ -216,16 +217,12 @@ extern uint256 ParseHashO(const UniValue &o, std::string strKey);
 extern std::vector<uint8_t> ParseHexV(const UniValue &v, std::string strName);
 extern std::vector<uint8_t> ParseHexO(const UniValue &o, std::string strKey);
 
-extern int64_t nWalletUnlockTime;
 extern Amount AmountFromValue(const UniValue &value);
 extern UniValue ValueFromAmount(const Amount &amount);
-extern std::string HelpRequiringPassphrase();
 extern std::string HelpExampleCli(const std::string &methodname,
                                   const std::string &args);
 extern std::string HelpExampleRpc(const std::string &methodname,
                                   const std::string &args);
-
-extern void EnsureWalletIsUnlocked();
 
 bool StartRPC();
 void InterruptRPC();

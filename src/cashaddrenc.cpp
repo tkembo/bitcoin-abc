@@ -12,30 +12,53 @@
 
 #include <algorithm>
 
-const uint8_t PUBKEY_TYPE = 0;
-const uint8_t SCRIPT_TYPE = 1;
-
-// Size of data-part in a pubkey/script cash address.
-// Consists of: 8 bits version + 160 bits hash.
-const size_t CASHADDR_GROUPED_SIZE = 34; /* 5 bit representation */
-const size_t CASHADDR_BYTES = 21;        /* 8 bit representation */
-
 namespace {
 
 // Convert the data part to a 5 bit representation.
 template <class T>
-std::vector<uint8_t> PackAddrData(const T &id, uint8_t type,
-                                  size_t expectedSize) {
-    std::vector<uint8_t> data = {uint8_t(type << 3)};
-    data.insert(data.end(), id.begin(), id.end());
+std::vector<uint8_t> PackAddrData(const T &id, uint8_t type) {
+    uint8_t version_byte(type << 3);
+    size_t size = id.size();
+    uint8_t encoded_size = 0;
+    switch (size * 8) {
+        case 160:
+            encoded_size = 0;
+            break;
+        case 192:
+            encoded_size = 1;
+            break;
+        case 224:
+            encoded_size = 2;
+            break;
+        case 256:
+            encoded_size = 3;
+            break;
+        case 320:
+            encoded_size = 4;
+            break;
+        case 384:
+            encoded_size = 5;
+            break;
+        case 448:
+            encoded_size = 6;
+            break;
+        case 512:
+            encoded_size = 7;
+            break;
+        default:
+            throw std::runtime_error(
+                "Error packing cashaddr: invalid address length");
+    }
+    version_byte |= encoded_size;
+    std::vector<uint8_t> data = {version_byte};
+    data.insert(data.end(), std::begin(id), std::end(id));
 
     std::vector<uint8_t> converted;
-    converted.reserve(expectedSize);
-    ConvertBits<8, 5, true>(converted, begin(data), end(data));
-
-    if (converted.size() != expectedSize) {
-        throw std::runtime_error("Error packing cashaddr");
-    }
+    // Reserve the number of bytes required for a 5-bit packed version of a
+    // hash, with version byte.  Add half a byte(4) so integer math provides
+    // the next multiple-of-5 that would fit all the data.
+    converted.reserve(((size + 1) * 8 + 4) / 5);
+    ConvertBits<8, 5, true>(converted, std::begin(data), std::end(data));
 
     return converted;
 }
@@ -46,14 +69,12 @@ public:
     CashAddrEncoder(const CChainParams &p) : params(p) {}
 
     std::string operator()(const CKeyID &id) const {
-        std::vector<uint8_t> data =
-            PackAddrData(id, PUBKEY_TYPE, CASHADDR_GROUPED_SIZE);
+        std::vector<uint8_t> data = PackAddrData(id, PUBKEY_TYPE);
         return cashaddr::Encode(params.CashAddrPrefix(), data);
     }
 
     std::string operator()(const CScriptID &id) const {
-        std::vector<uint8_t> data =
-            PackAddrData(id, SCRIPT_TYPE, CASHADDR_GROUPED_SIZE);
+        std::vector<uint8_t> data = PackAddrData(id, SCRIPT_TYPE);
         return cashaddr::Encode(params.CashAddrPrefix(), data);
     }
 
@@ -63,7 +84,7 @@ private:
     const CChainParams &params;
 };
 
-} // anon ns
+} // namespace
 
 std::string EncodeCashAddr(const CTxDestination &dst,
                            const CChainParams &params) {
@@ -82,25 +103,26 @@ CTxDestination DecodeCashAddr(const std::string &addr,
 
 CashAddrContent DecodeCashAddrContent(const std::string &addr,
                                       const CChainParams &params) {
-    std::pair<std::string, std::vector<uint8_t>> cashaddr =
-        cashaddr::Decode(addr);
+    std::string prefix;
+    std::vector<uint8_t> payload;
+    std::tie(prefix, payload) = cashaddr::Decode(addr, params.CashAddrPrefix());
 
-    if (cashaddr.first != params.CashAddrPrefix()) {
+    if (prefix != params.CashAddrPrefix()) {
         return {};
     }
 
-    if (cashaddr.second.empty()) {
+    if (payload.empty()) {
         return {};
     }
 
     // Check that the padding is zero.
-    size_t extrabits = cashaddr.second.size() * 5 % 8;
+    size_t extrabits = payload.size() * 5 % 8;
     if (extrabits >= 5) {
         // We have more padding than allowed.
         return {};
     }
 
-    uint8_t last = cashaddr.second.back();
+    uint8_t last = payload.back();
     uint8_t mask = (1 << extrabits) - 1;
     if (last & mask) {
         // We have non zero bits as padding.
@@ -108,9 +130,8 @@ CashAddrContent DecodeCashAddrContent(const std::string &addr,
     }
 
     std::vector<uint8_t> data;
-    data.reserve(CASHADDR_BYTES);
-    ConvertBits<5, 8, false>(data, begin(cashaddr.second),
-                             end(cashaddr.second));
+    data.reserve(payload.size() * 5 / 8);
+    ConvertBits<5, 8, false>(data, begin(payload), end(payload));
 
     // Decode type and size from the version.
     uint8_t version = data[0];
@@ -119,7 +140,7 @@ CashAddrContent DecodeCashAddrContent(const std::string &addr,
         return {};
     }
 
-    uint8_t type = (version >> 3) & 0x1f;
+    auto type = CashAddrType((version >> 3) & 0x1f);
     uint32_t hash_size = 20 + 4 * (version & 0x03);
     if (version & 0x04) {
         hash_size *= 2;
@@ -132,7 +153,6 @@ CashAddrContent DecodeCashAddrContent(const std::string &addr,
 
     // Pop the version.
     data.erase(data.begin());
-
     return {type, std::move(data)};
 }
 
@@ -153,4 +173,10 @@ CTxDestination DecodeCashAddrDestination(const CashAddrContent &content) {
         default:
             return CNoDestination{};
     }
+}
+
+// PackCashAddrContent allows for testing PackAddrData in unittests due to
+// template definitions.
+std::vector<uint8_t> PackCashAddrContent(const CashAddrContent &content) {
+    return PackAddrData(content.hash, content.type);
 }
